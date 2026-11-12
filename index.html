@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScreenLink</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--text:#e8eaf0;--mute:#8b92a3;--acc:#4f8cff;--ok:#3ecf8e;--bad:#ff5d6c}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:20px}
+  .wrap{width:100%;max-width:720px}
+  h1{margin:0 0 4px;font-size:28px}
+  p.sub{margin:0 0 22px;color:var(--mute)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>*{flex:1 1 200px}
+  label{display:block;font-size:12px;color:var(--mute);margin-bottom:6px}
+  input{width:100%;padding:10px 12px;background:#10131a;border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:14px}
+  button{cursor:pointer;border:1px solid var(--line);background:#10131a;color:var(--text);border-radius:12px;padding:18px;font-size:16px;font-weight:600;transition:.15s}
+  button:hover{border-color:var(--acc);background:#141a26}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+  button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+  button small{display:block;font-weight:400;color:var(--mute);font-size:12px;margin-top:4px}
+  kbd{background:#10131a;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-size:12px}
+  .hidden{display:none!important}
+  .dev{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-top:10px;background:#10131a}
+  .dev b{display:block}.dev span{font-size:12px;color:var(--mute)}
+  .dev button{padding:8px 16px;font-size:14px;border-radius:8px}
+  .status{font-size:13px;color:var(--mute);display:flex;align-items:center;gap:8px;margin-top:14px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--mute)}
+  .dot.on{background:var(--ok)}.dot.err{background:var(--bad)}
+  video{width:100%;background:#000;border-radius:12px;max-height:75vh}
+  .bar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .bar button{padding:8px 14px;font-size:14px;border-radius:8px}
+  .empty{color:var(--mute);text-align:center;padding:24px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ScreenLink</h1>
+  <p class="sub">Share your screen to another device, or watch one.</p>
+
+  <!-- HOME -->
+  <div id="home">
+    <div class="card row">
+      <div><label>This device's name</label><input id="devname" maxlength="30" autocomplete="off"></div>
+    </div>
+    <div class="row">
+      <button id="btnShare" class="primary">Share Screen<small>Hotkey: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd></small></button>
+      <button id="btnWatch">Watch Screen<small>See devices that are sharing</small></button>
+    </div>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+  </div>
+
+  <!-- SHARING -->
+  <div id="sharing" class="card hidden">
+    <h3 style="margin-top:0">You are sharing your screen</h3>
+    <p class="sub" id="shareInfo">Waiting for viewers…</p>
+    <button id="btnStop" class="danger">Stop sharing (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>)</button>
+  </div>
+
+  <!-- DEVICE LIST -->
+  <div id="list" class="card hidden">
+    <div class="bar"><button id="listBack">← Back</button></div>
+    <h3 style="margin:0">Devices sharing</h3>
+    <div id="devices"></div>
+  </div>
+
+  <!-- VIEWER -->
+  <div id="viewer" class="hidden">
+    <div class="bar">
+      <button id="viewBack">← Back to devices</button>
+      <button id="btnFull">Fullscreen</button>
+      <span class="status" style="margin:0" id="viewStatus">Connecting…</span>
+    </div>
+    <video id="vid" autoplay playsinline controls></video>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const BROKER = 'wss://broker.emqx.io:8084/mqtt';      // public signaling broker (change if you like)
+  const RTC_CFG = { iceServers: [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}] };
+  const myId = Math.random().toString(36).slice(2, 10);
+
+  // ---- settings ----
+  const store = {
+    get:(k,d)=>{try{return localStorage.getItem(k)||d}catch{return d}},
+    set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}
+  };
+  $('devname').value = store.get('sl_name', 'Device-' + myId.slice(0,4));
+  // Everyone who opens this site shares one list. Change this string to make your own private "lobby".
+  const NS = 'screenlink-v1/public-lobby-7f3a9c';
+
+  // ---- UI helpers ----
+  const views = ['home','sharing','list','viewer'];
+  const show = v => views.forEach(x => $(x).classList.toggle('hidden', x !== v));
+  const setStatus = (t, cls='') => { $('status').textContent = t; $('dot').className = 'dot ' + cls; };
+
+  // ---- MQTT ----
+  let client, connected = false;
+  const handlers = [];
+  function connect() {
+    store.set('sl_name', $('devname').value.trim());
+    if (client) client.end(true);
+    client = mqtt.connect(BROKER, {
+      clientId: 'sl_' + myId + '_' + Math.random().toString(36).slice(2,5),
+      reconnectPeriod: 3000,
+      will: { topic: `${NS}/presence/${myId}`, payload: '', retain: true, qos: 0 }
+    });
+    client.on('connect', () => {
+      connected = true; setStatus('Connected', 'on');
+      client.subscribe(`${NS}/signal/${myId}`);
+      if (mode === 'watch') client.subscribe(`${NS}/presence/+`);
+      if (stream) announce();
+    });
+    client.on('close', () => { connected = false; setStatus('Disconnected – retrying…', 'err'); });
+    client.on('error', () => setStatus('Connection error', 'err'));
+    client.on('message', (topic, buf) => {
+      const parts = topic.split('/');
+      const kind = parts[parts.length - 2], id = parts[parts.length - 1];
+      if (kind === 'presence') return onPresence(id, buf.toString());
+      if (kind === 'signal') { try { onSignal(JSON.parse(buf.toString())); } catch {} }
+    });
+  }
+  const send = (to, msg) => client.publish(`${NS}/signal/${to}`, JSON.stringify({ ...msg, from: myId }));
+
+  let mode = 'home';
+
+  // ======================= SHARE =======================
+  let stream = null, hb = null;
+  const sharerPCs = {};   // viewerId -> {pc, pending[]}
+
+  function announce() {
+    client.publish(`${NS}/presence/${myId}`,
+      JSON.stringify({ id: myId, name: $('devname').value.trim() || 'Device-' + myId.slice(0,4), ts: Date.now() }),
+      { retain: true });
+  }
+
+  async function startShare() {
+    if (stream) return stopShare();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      alert('Screen sharing is not supported on this browser/device. Use a desktop browser.'); return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+    } catch (e) { stream = null; return; }    // user cancelled the picker
+    mode = 'share'; show('sharing');
+    stream.getVideoTracks()[0].addEventListener('ended', stopShare);
+    announce(); hb = setInterval(announce, 20000);
+    updateShareInfo();
+  }
+
+  function stopShare() {
+    if (!stream) return;
+    stream.getTracks().forEach(t => t.stop()); stream = null;
+    clearInterval(hb);
+    Object.keys(sharerPCs).forEach(closeSharerPC);
+    if (client) client.publish(`${NS}/presence/${myId}`, '', { retain: true });
+    mode = 'home'; show('home');
+  }
+
+  function updateShareInfo() {
+    const n = Object.keys(sharerPCs).length;
+    $('shareInfo').textContent = n ? `${n} viewer${n>1?'s':''} watching` : 'Waiting for viewers…';
+  }
+
+  function closeSharerPC(id) {
+    const e = sharerPCs[id]; if (!e) return;
+    try { e.pc.close(); } catch {}
+    delete sharerPCs[id]; updateShareInfo();
+  }
+
+  async function sharerOnWatch(viewerId) {
+    closeSharerPC(viewerId);
+    const pc = new RTCPeerConnection(RTC_CFG);
+    const entry = sharerPCs[viewerId] = { pc, pending: [] };
+    stream.getTracks().forEach(t => pc.addTrack(t, stream));
+    pc.onicecandidate = e => e.candidate && send(viewerId, { type: 'ice', data: e.candidate });
+    pc.onconnectionstatechange = () => {
+      if (['failed','closed','disconnected'].includes(pc.connectionState)) closeSharerPC(viewerId);
+      else updateShareInfo();
+    };
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    send(viewerId, { type: 'offer', data: pc.localDescription });
+    updateShareInfo();
+  }
+
+  // ======================= WATCH =======================
+  const devices = {};      // id -> {name, ts}
+  let viewerPC = null, viewerPending = [], viewerRemoteSet = false, watchingId = null;
+
+  function startWatchMode() {
+    mode = 'watch'; show('list'); renderDevices();
+    if (connected) client.subscribe(`${NS}/presence/+`);
+  }
+
+  function onPresence(id, payload) {
+    if (id === myId) return;
+    if (!payload) delete devices[id];
+    else { try { devices[id] = JSON.parse(payload); } catch {} }
+    renderDevices();
+  }
+
+  function renderDevices() {
+    const box = $('devices'); box.innerHTML = '';
+    const now = Date.now();
+    const live = Object.entries(devices).filter(([,d]) => now - d.ts < 70000);
+    if (!live.length) { box.innerHTML = '<div class="empty">No devices are sharing yet.<br>Open this page on another device and press Share.</div>'; return; }
+    live.forEach(([id, d]) => {
+      const row = document.createElement('div'); row.className = 'dev';
+      const info = document.createElement('div');
+      const b = document.createElement('b'); b.textContent = d.name;
+      const s = document.createElement('span'); s.textContent = 'ID ' + id;
+      info.append(b, s);
+      const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = 'Select & Watch';
+      btn.onclick = () => watch(id);
+      row.append(info, btn); box.append(row);
+    });
+  }
+  setInterval(() => { if (mode === 'watch') renderDevices(); }, 10000);
+
+  function watch(id) {
+    leaveViewer(false);
+    watchingId = id; show('viewer'); $('viewStatus').textContent = 'Connecting…';
+    viewerPending = []; viewerRemoteSet = false;
+    send(id, { type: 'watch' });
+    setTimeout(() => { if (watchingId === id && !$('vid').srcObject) $('viewStatus').textContent = 'Still connecting… (network may block direct connection)'; }, 12000);
+  }
+
+  function leaveViewer(goBack = true) {
+    if (watchingId && client) send(watchingId, { type: 'leave' });
+    if (viewerPC) { try { viewerPC.close(); } catch {} viewerPC = null; }
+    $('vid').srcObject = null; watchingId = null;
+    if (goBack) { show('list'); renderDevices(); }
+  }
+
+  async function viewerOnOffer(from, offer) {
+    if (from !== watchingId) return;
+    if (viewerPC) try { viewerPC.close(); } catch {}
+    const pc = viewerPC = new RTCPeerConnection(RTC_CFG);
+    viewerRemoteSet = false;
+    pc.onicecandidate = e => e.candidate && send(from, { type: 'ice', data: e.candidate });
+    pc.ontrack = e => { $('vid').srcObject = e.streams[0]; $('vid').play().catch(()=>{}); $('viewStatus').textContent = 'Watching'; };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed') $('viewStatus').textContent = 'Connection failed (a TURN server may be needed)';
+      if (pc.connectionState === 'disconnected') $('viewStatus').textContent = 'Disconnected';
+    };
+    await pc.setRemoteDescription(offer);
+    viewerRemoteSet = true;
+    for (const c of viewerPending) await pc.addIceCandidate(c).catch(()=>{});
+    viewerPending = [];
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    send(from, { type: 'answer', data: pc.localDescription });
+  }
+
+  // ======================= SIGNAL ROUTER =======================
+  async function onSignal(m) {
+    const { type, from, data } = m;
+    if (type === 'watch' && stream) return sharerOnWatch(from);
+    if (type === 'leave') return closeSharerPC(from);
+    if (type === 'offer') return viewerOnOffer(from, data);
+    if (type === 'answer' && sharerPCs[from]) {
+      const e = sharerPCs[from];
+      await e.pc.setRemoteDescription(data);
+      e.remoteSet = true;
+      for (const c of e.pending) await e.pc.addIceCandidate(c).catch(()=>{});
+      e.pending = [];
+      return;
+    }
+    if (type === 'ice') {
+      if (sharerPCs[from]) {
+        const e = sharerPCs[from];
+        e.remoteSet ? e.pc.addIceCandidate(data).catch(()=>{}) : e.pending.push(data);
+      } else if (from === watchingId && viewerPC) {
+        viewerRemoteSet ? viewerPC.addIceCandidate(data).catch(()=>{}) : viewerPending.push(data);
+      }
+    }
+  }
+
+  // ======================= EVENTS =======================
+  $('btnShare').onclick = startShare;
+  $('btnWatch').onclick = startWatchMode;
+  $('btnStop').onclick = stopShare;
+  $('listBack').onclick = () => { mode = 'home'; show('home'); };
+  $('viewBack').onclick = () => leaveViewer(true);
+  $('btnFull').onclick = () => $('vid').requestFullscreen && $('vid').requestFullscreen();
+  $('devname').addEventListener('change', () => { store.set('sl_name', $('devname').value.trim()); if (stream) announce(); });
+
+  // Hotkey: Ctrl + Shift + X  (starts the screen-picker; press again to stop)
+  window.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'x') {
+      e.preventDefault();
+      if (mode !== 'watch' && !watchingId) startShare();
+    }
+  });
+  window.addEventListener('beforeunload', () => {
+    if (client && stream) client.publish(`${NS}/presence/${myId}`, '', { retain: true });
+  });
+
+  connect();
+})();
+</script>
+</body>
+</html>
