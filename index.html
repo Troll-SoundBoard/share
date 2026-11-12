@@ -8,20 +8,19 @@
   :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--text:#e8eaf0;--mute:#8b92a3;--acc:#4f8cff;--ok:#3ecf8e;--bad:#ff5d6c}
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:20px}
-  .wrap{width:100%;max-width:960px}
+  .wrap{width:100%;max-width:720px}
   h1{margin:0 0 4px;font-size:28px}
   p.sub{margin:0 0 22px;color:var(--mute)}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
   .row{display:flex;gap:12px;flex-wrap:wrap}
   .row>*{flex:1 1 200px}
   label{display:block;font-size:12px;color:var(--mute);margin-bottom:6px}
-  input[type=text]{width:100%;padding:10px 12px;background:#10131a;border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:14px}
+  input{width:100%;padding:10px 12px;background:#10131a;border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:14px}
   button{cursor:pointer;border:1px solid var(--line);background:#10131a;color:var(--text);border-radius:12px;padding:18px;font-size:16px;font-weight:600;transition:.15s}
   button:hover{border-color:var(--acc);background:#141a26}
   button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
   button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
   button small{display:block;font-weight:400;color:var(--mute);font-size:12px;margin-top:4px}
-  button.primary small{color:#dbe7ff}
   kbd{background:#10131a;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-size:12px}
   .hidden{display:none!important}
   .dev{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-top:10px;background:#10131a}
@@ -30,30 +29,25 @@
   .status{font-size:13px;color:var(--mute);display:flex;align-items:center;gap:8px;margin-top:14px}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--mute)}
   .dot.on{background:var(--ok)}.dot.err{background:var(--bad)}
-  video{width:100%;background:#000;border-radius:12px;max-height:80vh;outline:none;cursor:crosshair;object-fit:contain}
-  video:focus{box-shadow:0 0 0 2px var(--acc)}
-  .bar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+  video{width:100%;background:#000;border-radius:12px;max-height:75vh}
+  .bar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
   .bar button{padding:8px 14px;font-size:14px;border-radius:8px}
   .empty{color:var(--mute);text-align:center;padding:24px 0}
-  .hint{font-size:12px;color:var(--mute);margin-top:8px}
-  .chk{display:flex;align-items:center;gap:8px;font-size:14px;margin:12px 0;color:var(--text)}
-  .chk input{width:auto}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>ScreenLink</h1>
-  <p class="sub">Share your screen, or watch and control another device.</p>
+  <p class="sub">Share your screen to another device, or watch one.</p>
 
   <!-- HOME -->
   <div id="home">
-    <div class="card">
-      <label>This device's name</label>
-      <input type="text" id="devname" maxlength="30" autocomplete="off">
+    <div class="card row">
+      <div><label>This device's name</label><input id="devname" maxlength="30" autocomplete="off"></div>
     </div>
     <div class="row">
       <button id="btnShare" class="primary">Share Screen<small>Hotkey: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd></small></button>
-      <button id="btnWatch">Watch &amp; Control<small>See devices that are sharing</small></button>
+      <button id="btnWatch">Watch Screen<small>See devices that are sharing</small></button>
     </div>
     <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
   </div>
@@ -61,9 +55,7 @@
   <!-- SHARING -->
   <div id="sharing" class="card hidden">
     <h3 style="margin-top:0">You are sharing your screen</h3>
-    <p class="sub" id="shareInfo" style="margin-bottom:8px">Waiting for viewers…</p>
-    <div class="status" style="margin:0 0 6px"><span class="dot" id="ctlDot"></span><span id="ctlInfo">Remote control: helper not running</span></div>
-    <label class="chk"><input type="checkbox" id="allowCtl" checked> Allow viewers to control this computer</label>
+    <p class="sub" id="shareInfo">Waiting for viewers…</p>
     <button id="btnStop" class="danger">Stop sharing (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd>)</button>
   </div>
 
@@ -81,8 +73,7 @@
       <button id="btnFull">Fullscreen</button>
       <span class="status" style="margin:0" id="viewStatus">Connecting…</span>
     </div>
-    <video id="vid" autoplay playsinline muted tabindex="0" disablepictureinpicture></video>
-    <div class="hint">Click the screen to control it. Mouse and keyboard go straight to the host. Use Fullscreen to also capture keys like Esc and Alt+Tab.</div>
+    <video id="vid" autoplay playsinline controls></video>
   </div>
 </div>
 
@@ -90,28 +81,30 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const BROKER = 'wss://broker.emqx.io:8084/mqtt';      // public signaling broker
-  const HELPER_URL = 'ws://127.0.0.1:8765';             // local helper (helper.py) that moves the real mouse/keyboard
-  const RTC_CFG = { iceServers: [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}], bundlePolicy:'max-bundle' };
+  const BROKER = 'wss://broker.emqx.io:8084/mqtt';      // public signaling broker (change if you like)
+  const RTC_CFG = { iceServers: [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}] };
   const myId = Math.random().toString(36).slice(2, 10);
 
-  // Everyone who opens this site shares one list. Change this string to make your own private "lobby".
-  const NS = 'screenlink-v1/public-lobby-7f3a9c';
-
+  // ---- settings ----
   const store = {
     get:(k,d)=>{try{return localStorage.getItem(k)||d}catch{return d}},
     set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}
   };
   $('devname').value = store.get('sl_name', 'Device-' + myId.slice(0,4));
+  // Everyone who opens this site shares one list. Change this string to make your own private "lobby".
+  const NS = 'screenlink-v1/public-lobby-7f3a9c';
 
+  // ---- UI helpers ----
   const views = ['home','sharing','list','viewer'];
   const show = v => views.forEach(x => $(x).classList.toggle('hidden', x !== v));
   const setStatus = (t, cls='') => { $('status').textContent = t; $('dot').className = 'dot ' + cls; };
 
-  // ---------------- MQTT (discovery + signaling only) ----------------
-  let client, connected = false, mode = 'home';
+  // ---- MQTT ----
+  let client, connected = false;
+  const handlers = [];
   function connect() {
     store.set('sl_name', $('devname').value.trim());
+    if (client) client.end(true);
     client = mqtt.connect(BROKER, {
       clientId: 'sl_' + myId + '_' + Math.random().toString(36).slice(2,5),
       reconnectPeriod: 3000,
@@ -134,10 +127,11 @@
   }
   const send = (to, msg) => client.publish(`${NS}/signal/${to}`, JSON.stringify({ ...msg, from: myId }));
 
-  // ======================= SHARE (HOST) =======================
+  let mode = 'home';
+
+  // ======================= SHARE =======================
   let stream = null, hb = null;
-  const sharerPCs = {};
-  let helperWS = null, helperOK = false;
+  const sharerPCs = {};   // viewerId -> {pc, pending[]}
 
   function announce() {
     client.publish(`${NS}/presence/${myId}`,
@@ -145,47 +139,18 @@
       { retain: true });
   }
 
-  // --- local helper bridge ---
-  function controlEnabled() { return helperOK && $('allowCtl').checked; }
-  function updateCtlUI() {
-    $('ctlDot').className = 'dot ' + (helperOK ? 'on' : 'err');
-    $('ctlInfo').textContent = helperOK
-      ? ($('allowCtl').checked ? 'Remote control: ready' : 'Remote control: helper running, but disabled')
-      : 'Remote control: helper not running (viewers can watch only)';
-  }
-  function broadcastStatus() {
-    updateCtlUI();
-    const msg = JSON.stringify({ t: 'status', control: controlEnabled() });
-    Object.values(sharerPCs).forEach(e => { if (e.ctl && e.ctl.readyState === 'open') e.ctl.send(msg); });
-  }
-  function connectHelper() {
-    if (!stream) return;
-    try { helperWS = new WebSocket(HELPER_URL); } catch { setTimeout(connectHelper, 3000); return; }
-    helperWS.onopen = () => { helperOK = true; broadcastStatus(); };
-    helperWS.onclose = () => { helperOK = false; helperWS = null; if (stream) { broadcastStatus(); setTimeout(connectHelper, 3000); } };
-  }
-  function onInput(data) {
-    if (controlEnabled() && helperWS && helperWS.readyState === 1) helperWS.send(data);
-  }
-  $('allowCtl').addEventListener('change', broadcastStatus);
-
   async function startShare() {
     if (stream) return stopShare();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
       alert('Screen sharing is not supported on this browser/device. Use a desktop browser.'); return;
     }
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 60, max: 60 }, cursor: 'always' },
-        audio: false                                   // no audio = no A/V sync buffering = lower latency
-      });
-    } catch (e) { stream = null; return; }
-    const vt = stream.getVideoTracks()[0];
-    try { vt.contentHint = 'motion'; } catch {}        // favor smoothness / frame rate over sharpness
-    vt.addEventListener('ended', stopShare);
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+    } catch (e) { stream = null; return; }    // user cancelled the picker
     mode = 'share'; show('sharing');
+    stream.getVideoTracks()[0].addEventListener('ended', stopShare);
     announce(); hb = setInterval(announce, 20000);
-    updateShareInfo(); updateCtlUI(); connectHelper();
+    updateShareInfo();
   }
 
   function stopShare() {
@@ -193,15 +158,13 @@
     stream.getTracks().forEach(t => t.stop()); stream = null;
     clearInterval(hb);
     Object.keys(sharerPCs).forEach(closeSharerPC);
-    if (helperWS) { try { helperWS.close(); } catch {} }
-    helperOK = false;
     if (client) client.publish(`${NS}/presence/${myId}`, '', { retain: true });
     mode = 'home'; show('home');
   }
 
   function updateShareInfo() {
     const n = Object.keys(sharerPCs).length;
-    $('shareInfo').textContent = n ? `${n} viewer${n>1?'s':''} connected` : 'Waiting for viewers…';
+    $('shareInfo').textContent = n ? `${n} viewer${n>1?'s':''} watching` : 'Waiting for viewers…';
   }
 
   function closeSharerPC(id) {
@@ -210,47 +173,11 @@
     delete sharerPCs[id]; updateShareInfo();
   }
 
-  function preferH264(pc) {                            // hardware-encoded H.264 is usually the fastest path
-    try {
-      const caps = RTCRtpSender.getCapabilities('video'); if (!caps) return;
-      const h = caps.codecs.filter(c => /h264/i.test(c.mimeType));
-      const rest = caps.codecs.filter(c => !/h264/i.test(c.mimeType));
-      pc.getTransceivers().forEach(t => {
-        if (t.sender.track && t.sender.track.kind === 'video') t.setCodecPreferences([...h, ...rest]);
-      });
-    } catch {}
-  }
-
-  async function tuneSenders(pc) {
-    for (const s of pc.getSenders()) {
-      if (!s.track || s.track.kind !== 'video') continue;
-      try {
-        const p = s.getParameters();
-        if (!p.encodings || !p.encodings.length) p.encodings = [{}];
-        p.encodings[0].maxBitrate = 15e6;
-        p.encodings[0].maxFramerate = 60;
-        p.encodings[0].networkPriority = 'high';
-        p.degradationPreference = 'maintain-framerate';
-        await s.setParameters(p);
-      } catch {}
-    }
-  }
-
   async function sharerOnWatch(viewerId) {
     closeSharerPC(viewerId);
     const pc = new RTCPeerConnection(RTC_CFG);
-    const entry = sharerPCs[viewerId] = { pc, pending: [], remoteSet: false, ctl: null };
-
-    // input channels: moves = unordered/unreliable (always newest wins), everything else = reliable
-    const mv  = pc.createDataChannel('mv',  { ordered: false, maxRetransmits: 0 });
-    const ctl = pc.createDataChannel('ctl');
-    entry.ctl = ctl;
-    mv.onmessage = e => onInput(e.data);
-    ctl.onmessage = e => onInput(e.data);
-    ctl.onopen = () => ctl.send(JSON.stringify({ t: 'status', control: controlEnabled() }));
-
+    const entry = sharerPCs[viewerId] = { pc, pending: [] };
     stream.getTracks().forEach(t => pc.addTrack(t, stream));
-    preferH264(pc);
     pc.onicecandidate = e => e.candidate && send(viewerId, { type: 'ice', data: e.candidate });
     pc.onconnectionstatechange = () => {
       if (['failed','closed','disconnected'].includes(pc.connectionState)) closeSharerPC(viewerId);
@@ -258,23 +185,13 @@
     };
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    await tuneSenders(pc);
     send(viewerId, { type: 'offer', data: pc.localDescription });
     updateShareInfo();
   }
 
-  // ======================= WATCH (VIEWER) =======================
-  const devices = {};
+  // ======================= WATCH =======================
+  const devices = {};      // id -> {name, ts}
   let viewerPC = null, viewerPending = [], viewerRemoteSet = false, watchingId = null;
-  const ch = { mv: null, ctl: null };
-  let ctlAvail = false, rtt = null, baseStatus = 'Connecting…';
-
-  function renderViewStatus() {
-    let t = baseStatus;
-    if (rtt !== null) t += ` · ${rtt} ms`;
-    if (baseStatus === 'Watching') t += ctlAvail ? ' · control ON' : ' · view only (host helper not running)';
-    $('viewStatus').textContent = t;
-  }
 
   function startWatchMode() {
     mode = 'watch'; show('list'); renderDevices();
@@ -308,18 +225,16 @@
 
   function watch(id) {
     leaveViewer(false);
-    watchingId = id; show('viewer'); baseStatus = 'Connecting…'; renderViewStatus();
+    watchingId = id; show('viewer'); $('viewStatus').textContent = 'Connecting…';
     viewerPending = []; viewerRemoteSet = false;
     send(id, { type: 'watch' });
-    setTimeout(() => { if (watchingId === id && !$('vid').srcObject) { baseStatus = 'Still connecting… (network may block direct connection)'; renderViewStatus(); } }, 12000);
+    setTimeout(() => { if (watchingId === id && !$('vid').srcObject) $('viewStatus').textContent = 'Still connecting… (network may block direct connection)'; }, 12000);
   }
 
   function leaveViewer(goBack = true) {
     if (watchingId && client) send(watchingId, { type: 'leave' });
     if (viewerPC) { try { viewerPC.close(); } catch {} viewerPC = null; }
     $('vid').srcObject = null; watchingId = null;
-    ch.mv = ch.ctl = null; ctlAvail = false; rtt = null; pressed.clear();
-    if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     if (goBack) { show('list'); renderDevices(); }
   }
 
@@ -329,23 +244,10 @@
     const pc = viewerPC = new RTCPeerConnection(RTC_CFG);
     viewerRemoteSet = false;
     pc.onicecandidate = e => e.candidate && send(from, { type: 'ice', data: e.candidate });
-    pc.ondatachannel = e => {
-      ch[e.channel.label] = e.channel;
-      if (e.channel.label === 'ctl') {
-        e.channel.onmessage = m => {
-          try { const d = JSON.parse(m.data); if (d.t === 'status') { ctlAvail = !!d.control; renderViewStatus(); } } catch {}
-        };
-      }
-    };
-    pc.ontrack = e => {
-      try { e.receiver.playoutDelayHint = 0; } catch {}      // play frames immediately
-      try { e.receiver.jitterBufferTarget = 0; } catch {}    // smallest possible buffer
-      $('vid').srcObject = e.streams[0]; $('vid').play().catch(()=>{});
-      baseStatus = 'Watching'; renderViewStatus();
-    };
+    pc.ontrack = e => { $('vid').srcObject = e.streams[0]; $('vid').play().catch(()=>{}); $('viewStatus').textContent = 'Watching'; };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') { baseStatus = 'Connection failed (a TURN server may be needed)'; renderViewStatus(); }
-      if (pc.connectionState === 'disconnected') { baseStatus = 'Disconnected'; renderViewStatus(); }
+      if (pc.connectionState === 'failed') $('viewStatus').textContent = 'Connection failed (a TURN server may be needed)';
+      if (pc.connectionState === 'disconnected') $('viewStatus').textContent = 'Disconnected';
     };
     await pc.setRemoteDescription(offer);
     viewerRemoteSet = true;
@@ -356,53 +258,7 @@
     send(from, { type: 'answer', data: pc.localDescription });
   }
 
-  // live round-trip time readout
-  setInterval(async () => {
-    if (!viewerPC) return;
-    try {
-      const st = await viewerPC.getStats();
-      st.forEach(r => {
-        if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded' && r.currentRoundTripTime != null)
-          rtt = Math.round(r.currentRoundTripTime * 1000);
-      });
-      renderViewStatus();
-    } catch {}
-  }, 1000);
-
-  // ---------------- send mouse / keyboard to host ----------------
-  const vid = $('vid');
-  const pressed = new Set();
-  const sendMv  = o => { if (ch.mv  && ch.mv.readyState  === 'open') ch.mv.send(JSON.stringify(o)); };
-  const sendCtl = o => { if (ch.ctl && ch.ctl.readyState === 'open') ch.ctl.send(JSON.stringify(o)); };
-
-  function norm(e) {                                   // pointer position as 0..1 of the shared screen (handles letterboxing)
-    const r = vid.getBoundingClientRect(), vw = vid.videoWidth, vh = vid.videoHeight;
-    if (!vw || !vh) return null;
-    const s = Math.min(r.width / vw, r.height / vh), w = vw * s, h = vh * s;
-    const ox = r.left + (r.width - w) / 2, oy = r.top + (r.height - h) / 2;
-    return { x: Math.min(1, Math.max(0, (e.clientX - ox) / w)), y: Math.min(1, Math.max(0, (e.clientY - oy) / h)) };
-  }
-
-  let lastMove = null, raf = false;
-  vid.addEventListener('mousemove', e => {
-    lastMove = norm(e);
-    if (!raf) { raf = true; requestAnimationFrame(() => { raf = false; if (lastMove) sendMv({ t: 'm', x: lastMove.x, y: lastMove.y }); }); }
-  });
-  vid.addEventListener('mousedown', e => {
-    e.preventDefault(); vid.focus();
-    const p = norm(e); if (p) sendCtl({ t: 'd', b: e.button, x: p.x, y: p.y });
-  });
-  window.addEventListener('mouseup', e => {
-    if (!watchingId) return;
-    const p = norm(e); if (p) sendCtl({ t: 'u', b: e.button, x: p.x, y: p.y });
-  });
-  vid.addEventListener('contextmenu', e => e.preventDefault());
-  vid.addEventListener('wheel', e => { e.preventDefault(); sendCtl({ t: 'w', dx: e.deltaX, dy: e.deltaY }); }, { passive: false });
-  vid.addEventListener('keydown', e => { e.preventDefault(); pressed.add(e.code); sendCtl({ t: 'kd', c: e.code }); });
-  vid.addEventListener('keyup',   e => { e.preventDefault(); pressed.delete(e.code); sendCtl({ t: 'ku', c: e.code }); });
-  vid.addEventListener('blur', () => { pressed.forEach(c => sendCtl({ t: 'ku', c })); pressed.clear(); });
-
-  // ---------------- signal router ----------------
+  // ======================= SIGNAL ROUTER =======================
   async function onSignal(m) {
     const { type, from, data } = m;
     if (type === 'watch' && stream) return sharerOnWatch(from);
@@ -426,17 +282,13 @@
     }
   }
 
-  // ---------------- buttons & hotkey ----------------
+  // ======================= EVENTS =======================
   $('btnShare').onclick = startShare;
   $('btnWatch').onclick = startWatchMode;
   $('btnStop').onclick = stopShare;
   $('listBack').onclick = () => { mode = 'home'; show('home'); };
   $('viewBack').onclick = () => leaveViewer(true);
-  $('btnFull').onclick = async () => {
-    try { await vid.requestFullscreen(); } catch {}
-    try { if (navigator.keyboard && navigator.keyboard.lock) await navigator.keyboard.lock(); } catch {}   // capture Esc, Alt+Tab etc.
-    vid.focus();
-  };
+  $('btnFull').onclick = () => $('vid').requestFullscreen && $('vid').requestFullscreen();
   $('devname').addEventListener('change', () => { store.set('sl_name', $('devname').value.trim()); if (stream) announce(); });
 
   // Hotkey: Ctrl + Shift + X  (starts the screen-picker; press again to stop)
